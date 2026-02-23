@@ -1,12 +1,12 @@
 "use client";
 
 import { useDroppable } from "@dnd-kit/core";
-import { Seat, Member } from "@/lib/types";
+import { LayoutItem, Member } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { User } from "lucide-react";
 
 interface SeatProps {
-    seat: Seat;
+    seat: LayoutItem;
     occupant?: Member;
     history?: Array<{ year: number; displayName: string }>;
 }

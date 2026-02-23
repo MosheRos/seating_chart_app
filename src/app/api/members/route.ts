@@ -67,7 +67,7 @@ export async function DELETE(req: Request) {
         if (!id) return NextResponse.json({ error: "ID required" }, { status: 400 });
 
         const db = await getDb();
-        await db.run('DELETE FROM members WHERE id = ?', id);
+        await db.run('DELETE FROM members WHERE id = ?', [id]);
 
         return NextResponse.json({ success: true });
     } catch (error) {

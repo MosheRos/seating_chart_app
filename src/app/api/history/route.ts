@@ -15,7 +15,7 @@ export async function GET(req: Request) {
             // Get specific member's history
             const history = await db.all(
                 `SELECT year, seatLabel FROM seat_assignments WHERE memberId = ? ORDER BY year DESC`,
-                memberId
+                [memberId]
             );
             return NextResponse.json(history);
         } else {

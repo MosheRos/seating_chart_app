@@ -27,16 +27,27 @@ export async function POST(req: NextRequest) {
         // Each page has a 'Texts' array
         const textElements: Array<{ x: number; y: number; text: string }> = [];
 
-        pdfData.Pages.forEach((page: any) => {
-            page.Texts.forEach((text: any) => {
-                const decodedText = decodeURIComponent(text.R[0].T);
+        const pages = pdfData?.Pages ?? [];
+        for (const page of pages) {
+            const texts = page?.Texts ?? [];
+            for (const text of texts) {
+                const R = text?.R;
+                if (!Array.isArray(R) || R.length === 0) continue;
+                const first = R[0];
+                const raw = first?.T ?? "";
+                let decodedText: string;
+                try {
+                    decodedText = typeof raw === "string" ? decodeURIComponent(raw) : String(raw);
+                } catch {
+                    decodedText = String(raw);
+                }
                 textElements.push({
-                    x: text.x,
-                    y: text.y,
+                    x: text.x ?? 0,
+                    y: text.y ?? 0,
                     text: decodedText.trim()
                 });
-            });
-        });
+            }
+        }
 
         // Spatial grouping: Sort by Y, then by X
         // We cluster elements into 'rows' if their Y difference is small

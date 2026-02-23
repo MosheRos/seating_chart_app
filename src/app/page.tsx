@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -87,11 +87,25 @@ export default function Home() {
     } catch (e) { console.error(e); }
   };
 
+  // Track year so we skip persisting once when year changes (until loadLayout state is applied)
+  const previousYearRef = useRef<number | null>(null);
+
   useEffect(() => {
     loadMembers();
     loadLayout();
     loadHistory();
   }, [currentYear]);
+
+  // Persist layout to localStorage when items/tables/columnConfigs change (skip first run after year change)
+  useEffect(() => {
+    if (previousYearRef.current !== currentYear) {
+      previousYearRef.current = currentYear;
+      return;
+    }
+    localStorage.setItem(STORAGE_KEYS.LAYOUT(currentYear), JSON.stringify(items));
+    localStorage.setItem(STORAGE_KEYS.TABLES(currentYear), JSON.stringify(tables));
+    localStorage.setItem(`seating_app_cols_${currentYear}`, JSON.stringify(columnConfigs));
+  }, [currentYear, items, tables, columnConfigs]);
 
 
 
@@ -174,7 +188,7 @@ export default function Home() {
     columnConfigs.forEach((col, idx) => {
       const tId = `table-${Date.now()}-${idx}`;
       const sIds: string[] = [];
-      const tX = snap(idx * 384 + 100);
+      const tX = snap(col.xOffset);
       const tSs: LayoutItem[] = Array.from({ length: col.seatsPerTable }).map((_, si) => {
         const sId = `seat-${tId}-${si}`;
         sIds.push(sId);
@@ -340,57 +354,64 @@ export default function Home() {
   };
 
   const updateColumnSeats = (columnId: string, seats: number) => {
-    setColumnConfigs(prev => {
-      const newConfigs = [...prev];
-      const targetIdx = newConfigs.findIndex(c => c.id === columnId);
-      if (targetIdx === -1) return prev;
+    const targetIdx = columnConfigs.findIndex(c => c.id === columnId);
+    if (targetIdx === -1) return;
 
-      newConfigs[targetIdx].seatsPerTable = seats;
+    const newConfigs = [...columnConfigs];
+    newConfigs[targetIdx] = { ...newConfigs[targetIdx], seatsPerTable: seats };
 
-      // Recalculate ALL subsequent offsets
-      for (let i = targetIdx + 1; i < newConfigs.length; i++) {
-        const prevCol = newConfigs[i - 1];
-        newConfigs[i].xOffset = snap(prevCol.xOffset + (prevCol.seatsPerTable * 100) + 184);
+    for (let i = targetIdx + 1; i < newConfigs.length; i++) {
+      const prevCol = newConfigs[i - 1];
+      newConfigs[i] = { ...newConfigs[i], xOffset: snap(prevCol.xOffset + (prevCol.seatsPerTable * 100) + 184) };
+    }
+
+    const newTables: Table[] = [];
+    const itemsToRemove = new Set<string>();
+    const newSeats: LayoutItem[] = [];
+    const tableDx = new Map<string, number>();
+
+    tables.forEach(table => {
+      const config = newConfigs.find(c => c.id === table.columnId);
+      if (!config) {
+        newTables.push(table);
+        return;
       }
+      const tableX = config.xOffset;
+      const dX = tableX - table.x;
+      if (dX !== 0) tableDx.set(table.id, dX);
 
-      // Shift existing tables and seats
-      setTables(prevTables => prevTables.map(table => {
-        const config = newConfigs.find(c => c.id === table.columnId);
-        if (!config) return table;
-
-        const tableX = config.xOffset;
-        const oldX = table.x;
-        const dX = tableX - oldX;
-
-        if (table.columnId === columnId) {
-          // Resize this specific column's tables
-          const oldIds = table.seatIds;
-          const newSeatIds = Array.from({ length: seats }).map((_, i) => `seat-${table.id}-${i}`);
-
-          setItems(prevItems => {
-            const filtered = prevItems.filter(it => !oldIds.includes(it.id));
-            const newSeats: LayoutItem[] = newSeatIds.map((sId, si) => ({
-              id: sId,
-              type: "seat",
-              label: `${columnId.toUpperCase()} - S${si + 1}`,
-              x: tableX + (si * 100),
-              y: table.y + 44,
-              roomId: activeRoomId,
-              tableId: table.id,
-              columnId: columnId
-            }));
-            return [...filtered, ...newSeats];
+      if (table.columnId === columnId) {
+        const oldIds = table.seatIds;
+        const newSeatIds = Array.from({ length: seats }).map((_, i) => `seat-${table.id}-${i}`);
+        oldIds.forEach(id => itemsToRemove.add(id));
+        newSeatIds.forEach((sId, si) => {
+          newSeats.push({
+            id: sId,
+            type: "seat",
+            label: `${columnId.toUpperCase()} - S${si + 1}`,
+            x: tableX + (si * 100),
+            y: table.y + 44,
+            roomId: activeRoomId,
+            tableId: table.id,
+            columnId: columnId
           });
-          return { ...table, x: tableX, seatIds: newSeatIds };
-        } else if (dX !== 0) {
-          // Push subsequent columns
-          setItems(prevItems => prevItems.map(it => table.seatIds.includes(it.id) ? { ...it, x: it.x + dX } : it));
-          return { ...table, x: tableX };
-        }
-        return table;
-      }));
+        });
+        newTables.push({ ...table, x: tableX, seatIds: newSeatIds });
+      } else {
+        newTables.push({ ...table, x: tableX });
+      }
+    });
 
-      return newConfigs;
+    setColumnConfigs(newConfigs);
+    setTables(newTables);
+    setItems(prev => {
+      const filtered = prev.filter(it => !itemsToRemove.has(it.id));
+      const withNewSeats = [...filtered, ...newSeats];
+      return withNewSeats.map(it => {
+        const dX = it.tableId ? tableDx.get(it.tableId) : undefined;
+        if (dX !== undefined) return { ...it, x: it.x + dX };
+        return it;
+      });
     });
   };
 
